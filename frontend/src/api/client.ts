@@ -5,7 +5,7 @@ import type {
   ModelInfo,
 } from "../types/api";
 
-const BASE = "http://localhost:8000";
+const BASE = "https://meticulous-embrace-production-8241.up.railway.app";
 
 class ApiError extends Error {
   constructor(
