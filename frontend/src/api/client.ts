@@ -7,6 +7,7 @@ import type {
 
 const BASE = "https://meticulous-embrace-production-8241.up.railway.app";
 
+
 class ApiError extends Error {
   constructor(
     public status: number,
