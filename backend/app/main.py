@@ -1,12 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import predict, roads, models, health, weather, data
+from app.core.database import init_db
 
 app = FastAPI(
     title="STIS API",
     description="Smart Traffic Intelligence System - Kampala",
     version="3.0.0",
 )
+
+init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,7 +28,3 @@ app.include_router(data.router,    prefix="/data",    tags=["data"])
 @app.get("/")
 def root():
     return {"service": "STIS API", "version": "3.0.0", "status": "ok"}
-from app.core.database import init_db
-
-# بعد إنشاء app مباشرة
-init_db()
