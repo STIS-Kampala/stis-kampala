@@ -1,16 +1,15 @@
 """Data endpoints — real collected traffic data."""
 
 from fastapi import APIRouter
-import os
-import psycopg2
 from collections import defaultdict
+from app.core.database import get_conn
 
 router = APIRouter()
 
 
 def read_db():
     try:
-        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        conn = get_conn()
         cur = conn.cursor()
         cur.execute("""
             SELECT road_id, road_name, label, delay_ratio,
