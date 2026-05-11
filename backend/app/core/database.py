@@ -2,7 +2,14 @@ import os
 import psycopg2
 
 def get_conn():
-    return psycopg2.connect(os.environ["DATABASE_URL"])
+    return psycopg2.connect(
+        host=os.environ["PGHOST"],
+        dbname=os.environ["POSTGRES_DB"],
+        user=os.environ["POSTGRES_USER"],
+        password=os.environ["POSTGRES_PASSWORD"],
+        port=5432,
+        sslmode="require"
+    )
 
 def init_db():
     conn = get_conn()
