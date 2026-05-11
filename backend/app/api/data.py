@@ -1,25 +1,36 @@
 """Data endpoints — real collected traffic data."""
 
 from fastapi import APIRouter
-import os, csv
+import os
+import psycopg2
 from collections import defaultdict
 
 router = APIRouter()
 
-CSV_FILE = "data/real_kampala_traffic.csv"
 
-
-def read_csv():
-    if not os.path.exists(CSV_FILE):
+def read_db():
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT road_id, road_name, label, delay_ratio,
+                   hour, rain_mm, model_used, timestamp, source
+            FROM predictions ORDER BY timestamp
+        """)
+        cols = ["road_id", "road_name", "label", "delay_ratio",
+                "hour", "rain_mm", "model_used", "timestamp", "source"]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"DB read error: {e}")
         return []
-    with open(CSV_FILE, encoding="utf-8") as f:
-        return list(csv.DictReader(f))
 
 
 @router.get("/summary")
 def data_summary():
-    """How many records collected so far."""
-    rows = read_csv()
+    rows = read_db()
     if not rows:
         return {"total_records": 0, "message": "No data collected yet"}
 
@@ -33,20 +44,19 @@ def data_summary():
         sources[r.get("source", "unknown")] += 1
 
     return {
-        "total_records":   len(rows),
-        "unique_roads":    len(roads),
-        "first_record":    rows[0].get("timestamp"),
-        "last_record":     rows[-1].get("timestamp"),
-        "records_per_road": dict(roads),
+        "total_records":      len(rows),
+        "unique_roads":       len(roads),
+        "first_record":       str(rows[0].get("timestamp")),
+        "last_record":        str(rows[-1].get("timestamp")),
+        "records_per_road":   dict(roads),
         "label_distribution": dict(labels),
-        "data_sources": dict(sources),
+        "data_sources":       dict(sources),
     }
 
 
 @router.get("/latest")
 def data_latest():
-    """Last 8 records (one per road)."""
-    rows = read_csv()
+    rows = read_db()
     if not rows:
         return {"records": [], "count": 0}
     last = rows[-8:] if len(rows) >= 8 else rows
@@ -55,6 +65,5 @@ def data_latest():
 
 @router.get("/all")
 def data_all():
-    """All collected records."""
-    rows = read_csv()
+    rows = read_db()
     return {"records": rows, "count": len(rows)}
