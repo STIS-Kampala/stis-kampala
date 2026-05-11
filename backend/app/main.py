@@ -25,3 +25,7 @@ app.include_router(data.router,    prefix="/data",    tags=["data"])
 @app.get("/")
 def root():
     return {"service": "STIS API", "version": "3.0.0", "status": "ok"}
+from app.core.database import init_db
+
+# بعد إنشاء app مباشرة
+init_db()
