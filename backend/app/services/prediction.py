@@ -6,6 +6,7 @@ from app.schemas.schemas import (
     PredictRequest, PredictResponse,
     ConfidenceInterval, SHAPInfo, RiskInfo, CostInfo,
 )
+from app.core.database import get_conn
 
 MODEL_CONFIG = {
     "gradient_boosting": {"ci": 0.060, "conf": 0.9375, "adj": 0.98, "version": "v2.0"},
@@ -56,6 +57,20 @@ class PredictionService:
         extra_fuel = round((delay - 1) * 8.5 * 0.6, 2)
         extra_co2  = round((delay - 1) * 8.5 * 0.6 * road.km / 100 * 2300)
         ms = math.ceil((time.perf_counter_ns() - t0) / 1_000_000)
+
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO predictions 
+                (road_id, road_name, label, delay_ratio, hour, rain_mm, model_used)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (req.road_id, road.name, label, delay, req.hour, req.rain_mm, req.model))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as db_err:
+            print(f"DB save error: {db_err}")
 
         return PredictResponse(
             road_id      = req.road_id,
