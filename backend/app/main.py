@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import predict, roads, models, health
+from app.api import predict, roads, models, health, weather
 
 app = FastAPI(
     title="STIS API",
@@ -19,6 +19,7 @@ app.include_router(health.router,  prefix="/health",  tags=["health"])
 app.include_router(predict.router, prefix="/predict", tags=["predict"])
 app.include_router(roads.router,   prefix="/roads",   tags=["roads"])
 app.include_router(models.router,  prefix="/models",  tags=["models"])
+app.include_router(weather.router, prefix="/weather", tags=["weather"])
 
 @app.get("/")
 def root():
