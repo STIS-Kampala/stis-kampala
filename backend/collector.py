@@ -1,18 +1,9 @@
 """
 collector.py — Real Data Collection Pipeline for STIS Kampala
-=============================================================
-Collects every 30 minutes:
-  1. Google Maps Directions API  -> real ETA + congestion ratio
-  2. Open-Meteo API              -> rain, humidity, temperature (FREE, no key)
-  3. OpenWeatherMap API          -> backup weather
-
-Saves to: data/real_kampala_traffic.csv
-Run:      python collector.py           (single run)
-          python collector.py --loop    (every 30 min forever)
 """
 
 from __future__ import annotations
-import os, csv, time, datetime, argparse, logging
+import os, time, datetime, argparse, logging
 import requests
 
 logging.basicConfig(
@@ -23,10 +14,7 @@ logging.basicConfig(
 log = logging.getLogger("collector")
 
 GOOGLE_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "AIzaSyA1JpHbQH5symf6cssB6z-sAXRb2hkQMG4")
-OWM_KEY    = os.getenv("OPENWEATHERMAP_API_KEY", "2f741655470ba73b22dfc700dd37bd8c")
 
-os.makedirs("data", exist_ok=True)
-CSV_FILE = "data/real_kampala_traffic.csv"
 ROADS = [
     ("kampala_rd", "Kampala Road", "-0.3168,32.5811", "-0.3152,32.5722", 10, True),
     ("jinja_rd", "Jinja Road", "-0.3047,32.6312", "-0.3152,32.5722", 25, True),
@@ -36,17 +24,6 @@ ROADS = [
     ("gaba_rd", "Gaba Road", "-0.3152,32.5722", "-0.3667,32.6167", 15, True),
     ("portbell_rd", "Port Bell Road", "-0.3152,32.5722", "-0.2833,32.6500", 20, True),
     ("n_bypass", "Northern Bypass", "-0.2833,32.5500", "-0.2667,32.6333", 30, False),
-]
-
-FIELDNAMES = [
-    "timestamp", "date", "time", "day_of_week", "hour",
-    "road_id", "road_name",
-    "google_eta_min", "free_flow_min", "congestion_ratio",
-    "distance_km", "traffic_condition",
-    "rain_mm", "temperature_c", "humidity_pct", "wind_kmh",
-    "is_rush_morning", "is_rush_evening", "is_rush_midday",
-    "is_night", "is_weekend", "is_friday_pm",
-    "has_boda_boda", "label", "source",
 ]
 
 def get_google_eta(origin, destination):
@@ -120,7 +97,6 @@ def congestion_label(ratio):
 
 def collect_once():
     now     = datetime.datetime.now()
-    ts      = now.strftime("%Y-%m-%d %H:%M:%S")
     hour    = now.hour
     dow     = now.weekday()
     weather = get_open_meteo_weather()
@@ -131,57 +107,56 @@ def collect_once():
         log.info(f"  Querying: {road_name}...")
         gmaps = get_google_eta(origin, dest)
         if gmaps:
-            eta_min       = gmaps["eta_min"]
-            free_flow_min = gmaps["free_flow_min"]
             ratio         = gmaps["ratio"]
+            eta_min       = gmaps["eta_min"]
             distance_km   = gmaps["distance_km"]
-            condition     = gmaps["condition"]
             source        = "google_maps"
         else:
             rain_adj  = 1 + weather["rain_mm"] * 0.025
             rush_adj  = 1 + feats["is_rush_morning"]*0.85 + feats["is_rush_evening"]*1.10
             ratio     = round(min(3.5, max(0.5, rain_adj * rush_adj)), 4)
             eta_min   = round(free_flow_est * ratio, 1)
-            free_flow_min = free_flow_est
             distance_km   = 0.0
-            condition     = congestion_label(ratio)
             source        = "estimated"
 
         rows.append({
-            "timestamp": ts, "date": now.strftime("%Y-%m-%d"),
-            "time": now.strftime("%H:%M"), "day_of_week": now.strftime("%A"),
-            "hour": hour, "road_id": road_id, "road_name": road_name,
-            "google_eta_min": eta_min, "free_flow_min": free_flow_min,
-            "congestion_ratio": ratio, "distance_km": distance_km,
-            "traffic_condition": condition,
-            "rain_mm": weather["rain_mm"], "temperature_c": weather["temp_c"],
-            "humidity_pct": weather["humidity"], "wind_kmh": weather["wind_kmh"],
-            "is_rush_morning": feats["is_rush_morning"],
-            "is_rush_evening": feats["is_rush_evening"],
-            "is_rush_midday":  feats["is_rush_midday"],
-            "is_night":        feats["is_night"],
-            "is_weekend":      feats["is_weekend"],
-            "is_friday_pm":    feats["is_friday_pm"],
-            "has_boda_boda":   1 if has_boda else 0,
-            "label":           congestion_label(ratio),
-            "source":          source,
+            "road_id":          road_id,
+            "road_name":        road_name,
+            "label":            congestion_label(ratio),
+            "congestion_ratio": ratio,
+            "hour":             hour,
+            "rain_mm":          weather["rain_mm"],
+            "source":           source,
         })
         time.sleep(0.5)
     return rows
 
 def write_rows(rows):
-    file_exists = os.path.isfile(CSV_FILE)
-    with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerows(rows)
-    log.info(f"Wrote {len(rows)} rows to {CSV_FILE}")
+    try:
+        from app.core.database import get_conn
+        conn = get_conn()
+        cur = conn.cursor()
+        for r in rows:
+            cur.execute("""
+                INSERT INTO predictions
+                (road_id, road_name, label, delay_ratio, hour, rain_mm, model_used, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                r["road_id"], r["road_name"], r["label"],
+                r["congestion_ratio"], r["hour"], r["rain_mm"],
+                "collector", r["source"]
+            ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        log.info(f"Saved {len(rows)} rows to DB")
+    except Exception as e:
+        log.error(f"DB write error: {e}")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true")
-    parser.add_argument("--interval", type=int, default 10)
+    parser.add_argument("--interval", type=int, default=30)
     args = parser.parse_args()
     while True:
         log.info(f"--- Collection at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} ---")
