@@ -1,15 +1,24 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import predict, roads, models, health, weather, data
-from app.core.database import init_db
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        from app.core.database import init_db
+        init_db()
+        print("✅ DB initialized")
+    except Exception as e:
+        print(f"⚠️ DB init failed: {e}")
+    yield
 
 app = FastAPI(
     title="STIS API",
     description="Smart Traffic Intelligence System - Kampala",
     version="3.0.0",
+    lifespan=lifespan,
 )
-
-init_db()
 
 app.add_middleware(
     CORSMiddleware,
