@@ -181,7 +181,7 @@ def write_rows(rows):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true")
-    parser.add_argument("--interval", type=int, default=30)
+    parser.add_argument("--interval", type=int, default 10)
     args = parser.parse_args()
     while True:
         log.info(f"--- Collection at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} ---")
