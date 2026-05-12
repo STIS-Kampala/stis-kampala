@@ -1,9 +1,14 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Security, HTTPException
+from fastapi import FastAPI, Security, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.api import predict, roads, models, health, weather, data, collect
 import asyncio, os
+
+limiter = Limiter(key_func=get_remote_address)
 
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
@@ -42,6 +47,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -58,5 +66,6 @@ app.include_router(data.router,     prefix="/data",      tags=["data"],     depe
 app.include_router(collect.router,  prefix="/collect",   tags=["collect"],  dependencies=[Security(verify_api_key)])
 
 @app.get("/")
-def root():
+@limiter.limit("30/minute")
+async def root(request: Request):
     return {"service": "STIS API", "version": "3.0.0", "status": "ok"}
