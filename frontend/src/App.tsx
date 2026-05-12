@@ -2,12 +2,6 @@ import { useState } from "react";
 import { useRoads, useModels, usePredict, usePredictionHistory } from "./hooks/useSTIS";
 import type { RoadId, ModelName } from "./types/api";
 
-const LABEL_COLOR = {
-  high:   "var(--color-red)",
-  medium: "var(--color-amber)",
-  low:    "var(--color-green)",
-};
-
 export default function App() {
   const [road, setRoad]   = useState<RoadId>("jinja_rd");
   const [hour, setHour]   = useState(8);
@@ -26,173 +20,297 @@ export default function App() {
     );
   }
 
-  return (
-    <div style={{ padding: 16, maxWidth: 480, margin: "0 auto" }}>
+  const rushLbl = (h: number) => {
+    if (h >= 7 && h <= 9)   return "🌅 Rush AM";
+    if (h >= 12 && h <= 14) return "☀️ Midday";
+    if (h >= 17 && h <= 20) return "🌆 Rush PM";
+    if (h < 5 || h >= 23)   return "🌙 Night";
+    return "🕐 Off-Peak";
+  };
 
-      <div style={{ marginBottom: 16, borderBottom: "1px solid var(--color-border)", paddingBottom: 12 }}>
-        <div style={{ fontSize: 20, fontWeight: 900, background: "linear-gradient(90deg, #fcdc04, #2dd4bf, #38bdf8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-          🇺🇬 STIS
-        </div>
-        <div style={{ color: "var(--color-muted)", fontSize: 9, letterSpacing: 2 }}>
-          SMART TRAFFIC INTELLIGENCE · KAMPALA · v3.0
-        </div>
+  const rainIco = (mm: number) => mm === 0 ? "☀️" : mm < 20 ? "🌦" : mm < 50 ? "🌧" : "⛈";
+
+  const dotColor = (label: string) =>
+    label === "high" ? "#ff2d6b" : label === "medium" ? "#ffb800" : "#39ff14";
+
+  const lvlColor = (label: string) =>
+    label === "high" ? "#ff2d6b" : label === "medium" ? "#ffb800" : "#39ff14";
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500;700&display=swap');
+        *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+        :root {
+          --bg:#03040a; --s1:#080b14; --s2:#0d1120;
+          --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.12);
+          --c:#00ffe0; --c2:#ff2d6b; --c3:#6c63ff; --c4:#ffb800; --c5:#39ff14;
+          --t1:#ffffff; --t2:rgba(255,255,255,0.55); --t3:rgba(255,255,255,0.25);
+          --r:14px; --r2:20px;
+        }
+        html { scroll-behavior:smooth; }
+        body {
+          background:var(--bg); color:var(--t1);
+          font-family:'DM Sans',sans-serif;
+          min-height:100dvh; overflow-x:hidden;
+          -webkit-font-smoothing:antialiased;
+        }
+        .bg-fx { position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden; }
+        .bg-orb {
+          position:absolute; border-radius:50%; filter:blur(80px); opacity:0.12;
+          animation:orbFloat 12s ease-in-out infinite alternate;
+        }
+        .bg-orb:nth-child(1){width:500px;height:500px;background:var(--c);top:-150px;left:-100px;}
+        .bg-orb:nth-child(2){width:400px;height:400px;background:var(--c3);bottom:-100px;right:-80px;animation-delay:-4s;}
+        .bg-orb:nth-child(3){width:300px;height:300px;background:var(--c2);top:50%;left:50%;transform:translate(-50%,-50%);animation-delay:-8s;}
+        .bg-grid {
+          position:absolute;inset:0;
+          background-image:linear-gradient(rgba(0,255,224,0.025) 1px,transparent 1px),
+          linear-gradient(90deg,rgba(0,255,224,0.025) 1px,transparent 1px);
+          background-size:44px 44px;
+        }
+        @keyframes orbFloat { 0%{transform:scale(1) translate(0,0)} 100%{transform:scale(1.2) translate(30px,20px)} }
+        @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+        @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+        @keyframes gradAnim{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+        .app { position:relative;z-index:1;max-width:460px;margin:0 auto;padding:0 16px 60px; }
+        .sec-hd {
+          display:flex;align-items:center;gap:12px;margin:28px 0 10px;
+          font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.25em;
+          text-transform:uppercase;color:var(--t3);
+        }
+        .sec-hd::after{content:'';flex:1;height:1px;background:var(--border);}
+        .sec-num {
+          width:20px;height:20px;border-radius:50%;background:var(--border);
+          display:grid;place-items:center;font-size:9px;color:var(--t3);flex-shrink:0;
+        }
+        .road-item {
+          position:relative;overflow:hidden;
+          display:flex;align-items:center;justify-content:space-between;
+          padding:13px 16px;background:var(--s1);border:1px solid var(--border);
+          border-radius:var(--r);cursor:pointer;margin-bottom:5px;
+          transition:background 0.2s,border-color 0.2s,transform 0.15s;
+        }
+        .road-item::before {
+          content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+          border-radius:0 3px 3px 0;background:transparent;transition:all 0.2s;
+        }
+        .road-item:hover{background:#0f1422;transform:translateX(3px);}
+        .road-item.sel{background:rgba(0,255,224,0.05);border-color:rgba(0,255,224,0.22);box-shadow:0 0 30px rgba(0,255,224,0.1);}
+        .road-item.sel::before{background:var(--c);box-shadow:0 0 10px var(--c);}
+        .road-item.sel .road-name{color:var(--c);}
+        .param-card{background:var(--s1);border:1px solid var(--border);border-radius:var(--r2);padding:18px 20px;margin-bottom:10px;}
+        .slider-wrap{position:relative;height:6px;margin-top:4px;}
+        .slider-bg{position:absolute;inset:0;border-radius:100px;background:rgba(255,255,255,0.06);}
+        .slider-prog{position:absolute;top:0;left:0;bottom:0;border-radius:100px;background:linear-gradient(90deg,var(--c3),var(--c));box-shadow:0 0 14px rgba(0,255,224,0.25);transition:width 0.05s;}
+        .slider-prog.rain{background:linear-gradient(90deg,#1e6ef5,#5aacff);}
+        .slider-knob{position:absolute;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(0,255,224,0.25),0 3px 12px rgba(0,0,0,0.4);pointer-events:none;}
+        .slider-input{position:absolute;inset:-10px 0;width:100%;opacity:0;cursor:pointer;z-index:2;}
+        .model-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px;}
+        .model-card{background:var(--s1);border:1px solid var(--border);border-radius:var(--r);padding:16px 10px 14px;cursor:pointer;text-align:center;transition:all 0.2s;}
+        .model-card:hover{background:#0f1422;}
+        .model-card.sel{background:rgba(0,255,224,0.05);border-color:rgba(0,255,224,0.3);}
+        .model-card.sel .model-name{color:var(--c);}
+        .predict-btn{width:100%;border:none;cursor:pointer;background:transparent;padding:0;border-radius:var(--r2);position:relative;font-family:'Bebas Neue',cursive;font-size:20px;letter-spacing:0.15em;color:var(--bg);}
+        .predict-btn::before{content:'';position:absolute;inset:0;border-radius:var(--r2);background:linear-gradient(135deg,var(--c) 0%,#00d4b0 40%,var(--c3) 100%);background-size:200% 200%;animation:gradAnim 3s ease infinite;}
+        .predict-btn::after{content:'';position:absolute;inset:-3px;border-radius:calc(var(--r2)+3px);background:linear-gradient(135deg,var(--c),var(--c3));z-index:-1;opacity:0.35;filter:blur(15px);}
+        .predict-btn:hover{transform:translateY(-3px);}
+        .predict-inner{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:20px;}
+        .result-hero{background:var(--s1);border:1px solid var(--border);border-radius:var(--r2);padding:24px;animation:fadeIn 0.4s ease forwards;}
+        .stat-box{background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:14px;}
+        .hist-item{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--s1);border:1px solid var(--border);border-radius:var(--r);margin-bottom:6px;}
+        input[type=range]{-webkit-appearance:none;width:100%;height:6px;background:transparent;}
+      `}</style>
+
+      <div className="bg-fx">
+        <div className="bg-orb" />
+        <div className="bg-orb" />
+        <div className="bg-orb" />
+        <div className="bg-grid" />
       </div>
 
-      <div style={{ background: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: "var(--r-lg)", padding: 16, marginBottom: 12 }}>
+      <div className="app">
 
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ color: "var(--color-muted)", fontSize: 9, marginBottom: 6 }}>ROAD</div>
-          {roads?.map((r) => (
-            <div
-              key={r.id}
-              onClick={() => setRoad(r.id)}
-              style={{
-                background: road === r.id ? "rgba(56,189,248,0.1)" : "var(--color-surface)",
-                border: `1px solid ${road === r.id ? "var(--color-blue)" : "var(--color-border)"}`,
-                borderRadius: "var(--r-md)",
-                padding: "7px 10px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 4,
-              }}
-            >
-              <span style={{ color: LABEL_COLOR[r.label], fontSize: 8 }}>●</span>
-              <span style={{ color: road === r.id ? "var(--color-blue)" : "var(--color-text)", fontSize: 10 }}>
-                {r.name}
+        {/* HEADER */}
+        <header style={{ padding: "44px 0 28px" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: "0.3em", textTransform: "uppercase", color: "var(--c)", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 16, height: 1, background: "var(--c)", display: "inline-block" }} />
+                Kampala · v3.0
+              </div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 64, lineHeight: 0.9, background: "linear-gradient(160deg,#fff 0%,var(--c) 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                STIS
+              </div>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--t3)", marginTop: 4 }}>
+                Smart Traffic Intelligence System
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(0,255,224,0.07)", border: "1px solid rgba(0,255,224,0.18)", borderRadius: 100, padding: "8px 14px", fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: "0.15em", color: "var(--c)", textTransform: "uppercase", marginTop: 6 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--c)", animation: "blink 1.6s ease-in-out infinite", display: "inline-block" }} />
+              Online
+            </div>
+          </div>
+        </header>
+
+        {/* ROADS */}
+        <div className="sec-hd"><span className="sec-num">01</span>Select Road</div>
+        {roads?.map((r) => (
+          <div
+            key={r.id}
+            className={`road-item ${road === r.id ? "sel" : ""}`}
+            onClick={() => setRoad(r.id)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor(r.label), boxShadow: `0 0 8px ${dotColor(r.label)}99`, flexShrink: 0, display: "inline-block" }} />
+              <span className="road-name" style={{ fontSize: 14, fontWeight: 600, color: "var(--t2)", transition: "color 0.2s" }}>{r.name}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", background: "rgba(255,255,255,0.05)", color: "var(--t3)", padding: "3px 7px", borderRadius: 5 }}>{r.type}</span>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "var(--t3)" }}>{r.km}km</span>
+            </div>
+          </div>
+        ))}
+
+        {/* PARAMS */}
+        <div className="sec-hd"><span className="sec-num">02</span>Parameters</div>
+
+        <div className="param-card">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: "var(--t3)" }}>Hour of Day</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, letterSpacing: "0.05em", color: "var(--c)" }}>
+              {String(hour).padStart(2, "0")}:00{" "}
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, background: "rgba(255,184,0,0.1)", border: "1px solid rgba(255,184,0,0.2)", color: "var(--c4)", padding: "3px 8px", borderRadius: 6 }}>
+                {rushLbl(hour)}
               </span>
-              <span style={{ color: "var(--color-muted)", fontSize: 8, marginLeft: "auto" }}>
-                {r.type} · {r.km}km
+            </span>
+          </div>
+          <div className="slider-wrap">
+            <div className="slider-bg" />
+            <div className="slider-prog" style={{ width: `${(hour / 23) * 100}%` }} />
+            <div className="slider-knob" style={{ left: `${(hour / 23) * 100}%` }} />
+            <input type="range" className="slider-input" min={0} max={23} value={hour} onChange={(e) => setHour(Number(e.target.value))} />
+          </div>
+        </div>
+
+        <div className="param-card">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: "var(--t3)" }}>Rainfall</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, letterSpacing: "0.05em", color: "#5aacff" }}>
+              {rain} <span style={{ fontSize: 14, fontWeight: 300, color: "var(--t3)" }}>mm</span> {rainIco(rain)}
+            </span>
+          </div>
+          <div className="slider-wrap">
+            <div className="slider-bg" />
+            <div className="slider-prog rain" style={{ width: `${(rain / 40) * 100}%` }} />
+            <div className="slider-knob rain" style={{ left: `${(rain / 40) * 100}%` }} />
+            <input type="range" className="slider-input" min={0} max={40} step={0.5} value={rain} onChange={(e) => setRain(Number(e.target.value))} />
+          </div>
+        </div>
+
+        {/* MODEL */}
+        <div className="sec-hd"><span className="sec-num">03</span>ML Model</div>
+        <div className="model-grid">
+          {models?.map((m) => (
+            <div key={m.name} className={`model-card ${model === m.name ? "sel" : ""}`} onClick={() => setModel(m.name)}>
+              <span style={{ fontSize: 22, display: "block", marginBottom: 7 }}>
+                {m.name === "gradient_boosting" ? "🚀" : m.name === "random_forest" ? "🌲" : "📐"}
               </span>
+              <div className="model-name" style={{ fontSize: 13, fontWeight: 700, color: "var(--t2)" }}>
+                {m.name === "gradient_boosting" ? "GB" : m.name === "random_forest" ? "RF" : "Ridge"}
+              </div>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 8, letterSpacing: "0.08em", color: "var(--t3)", marginTop: 3, textTransform: "uppercase" }}>
+                {m.name === "gradient_boosting" ? "Gradient Boost" : m.name === "random_forest" ? "Random Forest" : "Linear Reg."}
+              </div>
             </div>
           ))}
         </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-            <span style={{ color: "var(--color-muted)", fontSize: 9 }}>HOUR</span>
-            <span style={{ color: "var(--color-blue)", fontSize: 10, fontWeight: 700 }}>
-              {String(hour).padStart(2, "0")}:00
-              {[7,8,9].includes(hour) ? " 🌅 Rush AM" : [17,18,19,20].includes(hour) ? " 🌆 Rush PM" : hour < 5 || hour >= 23 ? " 🌙 Night" : ""}
-            </span>
+        {/* PREDICT */}
+        <button className="predict-btn" onClick={handlePredict} disabled={predict.isPending}>
+          <div className="predict-inner">
+            <span style={{ fontSize: 22 }}>{predict.isPending ? "⏳" : "⚡"}</span>
+            {predict.isPending ? "Running Model..." : "Predict Traffic"}
           </div>
-          <input
-            type="range" min={0} max={23} value={hour}
-            onChange={(e) => setHour(Number(e.target.value))}
-            style={{ width: "100%", accentColor: "var(--color-blue)" }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-            <span style={{ color: "var(--color-muted)", fontSize: 9 }}>RAIN</span>
-            <span style={{ color: "var(--color-blue)", fontSize: 10, fontWeight: 700 }}>
-              {rain}mm {rain === 0 ? "☀️" : rain < 5 ? "🌦" : rain < 15 ? "🌧" : "⛈"}
-            </span>
-          </div>
-          <input
-            type="range" min={0} max={40} step={0.5} value={rain}
-            onChange={(e) => setRain(Number(e.target.value))}
-            style={{ width: "100%", accentColor: "var(--color-teal)" }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ color: "var(--color-muted)", fontSize: 9, marginBottom: 6 }}>MODEL</div>
-          <div style={{ display: "flex", gap: 5 }}>
-            {models?.map((m) => (
-              <button
-                key={m.name}
-                onClick={() => setModel(m.name)}
-                style={{
-                  flex: 1,
-                  background: model === m.name ? "rgba(56,189,248,0.1)" : "var(--color-surface)",
-                  border: `1px solid ${model === m.name ? "var(--color-blue)" : "var(--color-border)"}`,
-                  color: model === m.name ? "var(--color-blue)" : "var(--color-muted)",
-                  borderRadius: "var(--r-md)",
-                  padding: "6px 4px",
-                  cursor: "pointer",
-                  fontSize: 8,
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
-                {m.name === "gradient_boosting" ? "🚀 GB" : m.name === "random_forest" ? "🌲 RF" : "📐 Ridge"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <button
-          onClick={handlePredict}
-          disabled={predict.isPending}
-          style={{
-            width: "100%",
-            padding: "11px 0",
-            background: predict.isPending ? "var(--color-dim)" : "linear-gradient(135deg, var(--color-teal), var(--color-blue))",
-            border: "none",
-            borderRadius: "var(--r-md)",
-            color: "#fff",
-            fontSize: 11,
-            fontWeight: 800,
-            cursor: predict.isPending ? "not-allowed" : "pointer",
-            fontFamily: "var(--font-mono)",
-            letterSpacing: 2,
-          }}
-        >
-          {predict.isPending ? "⏳ PREDICTING..." : "⚡ PREDICT"}
         </button>
-      </div>
 
-      {predict.data && (
-        <div style={{
-          background: "var(--color-card)",
-          border: `1px solid ${LABEL_COLOR[predict.data.label]}44`,
-          borderRadius: "var(--r-lg)",
-          padding: 16,
-          marginBottom: 12,
-          textAlign: "center",
-          animation: "fadeIn 0.25s ease forwards",
-        }}>
-          <div style={{ color: "var(--color-muted)", fontSize: 9 }}>{predict.data.road_name}</div>
-          <div style={{ color: LABEL_COLOR[predict.data.label], fontSize: 38, fontWeight: 900 }}>
-            {predict.data.label.toUpperCase()}
-          </div>
-          <div style={{ color: "var(--color-text)", fontSize: 22, fontWeight: 700 }}>
-            {predict.data.travel_min} min
-          </div>
-          <div style={{ color: "var(--color-muted)", fontSize: 9 }}>
-            delay x{predict.data.delay_ratio} · CI [{predict.data.ci_95.lower}, {predict.data.ci_95.upper}]
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, marginTop: 12 }}>
-            {[
-              ["Confidence",    (predict.data.confidence * 100).toFixed(1) + "%", "var(--color-green)" ],
-              ["Latency",       predict.data.latency_ms + "ms",                   "var(--color-teal)"  ],
-              ["Accident Risk", predict.data.risk.accident + "/100",              "var(--color-red)"   ],
-              ["Top SHAP",      predict.data.shap.top_feature,                    "var(--color-purple)"],
-            ].map(([l, v, c]) => (
-              <div key={l} style={{ background: "var(--color-surface)", borderRadius: "var(--r-md)", padding: "7px 10px", display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--color-muted)", fontSize: 8 }}>{l}</span>
-                <span style={{ color: c, fontSize: 9, fontWeight: 700 }}>{v}</span>
+        {/* RESULT */}
+        {predict.data && (
+          <>
+            <div className="sec-hd" style={{ marginTop: 24 }}><span className="sec-num">04</span>Analysis</div>
+            <div className="result-hero">
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, letterSpacing: "0.03em" }}>{predict.data.road_name}</div>
+                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "var(--t3)", marginTop: 4 }}>
+                    {String(hour).padStart(2, "0")}:00 · {rain}mm · {model.replace(/_/g, " ").toUpperCase()}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: lvlColor(predict.data.label), textShadow: `0 0 20px ${lvlColor(predict.data.label)}66` }}>
+                    {predict.data.label.toUpperCase()}
+                  </div>
+                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: "var(--t3)", letterSpacing: "0.12em" }}>Congestion</div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
+                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 56, lineHeight: 1 }}>{predict.data.travel_min}</span>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 14, color: "var(--t2)" }}>MIN</span>
+              </div>
+              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "var(--t3)" }}>
+                delay ×{predict.data.delay_ratio} from base travel time
+              </div>
+
+              <div style={{ height: 1, background: "var(--border)", margin: "18px 0" }} />
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  ["Confidence",    `${(predict.data.confidence * 100).toFixed(1)}%`, "var(--c)"],
+                  ["Accident Risk", `${predict.data.risk.accident}/100`,               "var(--c2)"],
+                  ["Latency",       `${predict.data.latency_ms}ms`,                    "var(--c5)"],
+                  ["Top SHAP",      predict.data.shap.top_feature,                     "var(--c3)"],
+                ].map(([l, v, c]) => (
+                  <div key={l} className="stat-box">
+                    <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--t3)", marginBottom: 6 }}>{l}</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: c }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: "var(--t3)", width: 60 }}>95% CI</span>
+                <div style={{ flex: 1, height: 5, background: "rgba(255,255,255,0.05)", borderRadius: 100, position: "relative" }}>
+                  <div style={{ position: "absolute", top: 0, bottom: 0, left: `${Math.min(predict.data.ci_95.lower / 3 * 100, 85)}%`, width: `${Math.min((predict.data.ci_95.upper - predict.data.ci_95.lower) / 3 * 100 + 12, 50)}%`, borderRadius: 100, background: "linear-gradient(90deg,var(--c3),var(--c))" }} />
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "var(--t2)" }}>[{predict.data.ci_95.lower}, {predict.data.ci_95.upper}]</span>
+              </div>
+
+              <div style={{ background: "rgba(0,255,224,0.04)", border: "1px solid rgba(0,255,224,0.12)", borderLeft: "3px solid var(--c)", borderRadius: "0 12px 12px 0", padding: "14px 16px", fontSize: 13, lineHeight: 1.65, color: "var(--t2)", marginTop: 16 }}>
+                {predict.data.label === "high" ? <><strong style={{ color: "var(--c)" }}>{predict.data.road_name}</strong> has heavy congestion — <strong style={{ color: "var(--c)" }}>+{Math.round((predict.data.delay_ratio - 1) * 100)}%</strong> delay. Consider N. Bypass as alternate.</> :
+                 predict.data.label === "medium" ? <>Moderate traffic on <strong style={{ color: "var(--c)" }}>{predict.data.road_name}</strong>. Delay ×{predict.data.delay_ratio}. Off-peak hours recommended.</> :
+                 <><strong style={{ color: "var(--c)" }}>{predict.data.road_name}</strong> flowing well. Minimal delays expected.</>}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* HISTORY */}
+        {history.length > 0 && (
+          <>
+            <div className="sec-hd"><span className="sec-num">05</span>Recent Predictions</div>
+            {history.map((h, i) => (
+              <div key={i} className="hist-item">
+                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t2)" }}>{h.road_name}</span>
+                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 14, color: lvlColor(h.label) }}>{h.label.toUpperCase()}</span>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "var(--t3)" }}>{h.travel_min}min</span>
               </div>
             ))}
-          </div>
-        </div>
-      )}
+          </>
+        )}
 
-      {history.length > 0 && (
-        <div style={{ background: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: "var(--r-lg)", padding: 16 }}>
-          <div style={{ color: "var(--color-text)", fontSize: 11, fontWeight: 800, marginBottom: 10 }}>📜 Recent Predictions</div>
-          {history.map((h, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: i < history.length - 1 ? "1px solid var(--color-border)" : "none" }}>
-              <span style={{ color: "var(--color-text)", fontSize: 9 }}>{h.road_name}</span>
-              <span style={{ color: LABEL_COLOR[h.label], fontSize: 9, fontWeight: 700 }}>{h.label.toUpperCase()}</span>
-              <span style={{ color: "var(--color-mid)", fontSize: 9 }}>{h.travel_min}min</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-    </div>
+      </div>
+    </>
   );
 }
