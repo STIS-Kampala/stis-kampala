@@ -6,7 +6,7 @@ import type {
 } from "../types/api";
 
 const BASE = "https://meticulous-embrace-production-8241.up.railway.app";
-
+const API_KEY = "stis-kampala-2026-secret";
 
 class ApiError extends Error {
   constructor(
@@ -23,8 +23,12 @@ async function request<T>(
   options?: RequestInit,
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": API_KEY,
+      ...(options?.headers),
+    },
   });
 
   if (!res.ok) {
