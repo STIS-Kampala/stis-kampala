@@ -18,10 +18,7 @@ class ApiError extends Error {
   }
 }
 
-async function request<T>(
-  path: string,
-  options?: RequestInit,
-): Promise<T> {
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
@@ -30,12 +27,10 @@ async function request<T>(
       ...(options?.headers),
     },
   });
-
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     throw new ApiError(res.status, body.detail ?? res.statusText);
   }
-
   return res.json() as Promise<T>;
 }
 
@@ -46,19 +41,17 @@ export const api = {
       body: JSON.stringify(req),
     });
   },
-
   predictNow(road_id: string, rain_mm = 0): Promise<PredictResponse> {
-    return request<PredictResponse>(
-      `/predict/now/${road_id}?rain_mm=${rain_mm}`,
-    );
+    return request<PredictResponse>(`/predict/now/${road_id}?rain_mm=${rain_mm}`);
   },
-
   roads(): Promise<RoadMeta[]> {
     return request<RoadMeta[]>("/roads");
   },
-
   models(): Promise<ModelInfo[]> {
     return request<ModelInfo[]>("/models");
+  },
+  weather(): Promise<{ temperature: number; humidity: number; rainfall: number }> {
+    return request("/weather/current");
   },
 };
 
