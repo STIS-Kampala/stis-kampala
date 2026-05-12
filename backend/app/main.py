@@ -2,6 +2,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import predict, roads, models, health, weather, data, collect
+import asyncio
+
+async def run_collector():
+    while True:
+        try:
+            from app.api.collect import collect as do_collect
+            do_collect()
+            print("✅ Collector ran successfully")
+        except Exception as e:
+            print(f"⚠️ Collector error: {e}")
+        await asyncio.sleep(600)  # كل 10 دقايق
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -11,6 +22,7 @@ async def lifespan(app: FastAPI):
         print("✅ DB initialized")
     except Exception as e:
         print(f"⚠️ DB init failed: {e}")
+    asyncio.create_task(run_collector())
     yield
 
 app = FastAPI(
