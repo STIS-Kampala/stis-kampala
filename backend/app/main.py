@@ -1,8 +1,18 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Security, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security.api_key import APIKeyHeader
 from app.api import predict, roads, models, health, weather, data, collect
-import asyncio
+import asyncio, os
+
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def verify_api_key(api_key: str = Security(api_key_header)):
+    expected = os.getenv("API_KEY", "stis-dev-key")
+    if api_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return api_key
 
 async def run_collector():
     while True:
@@ -12,7 +22,7 @@ async def run_collector():
             print("✅ Collector ran successfully")
         except Exception as e:
             print(f"⚠️ Collector error: {e}")
-        await asyncio.sleep(600)  # كل 10 دقايق
+        await asyncio.sleep(600)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,12 +50,12 @@ app.add_middleware(
 )
 
 app.include_router(health.router,   prefix="/health",   tags=["health"])
-app.include_router(predict.router,  prefix="/predict",  tags=["predict"])
-app.include_router(roads.router,    prefix="/roads",    tags=["roads"])
-app.include_router(models.router,   prefix="/models",   tags=["models"])
-app.include_router(weather.router,  prefix="/weather",  tags=["weather"])
-app.include_router(data.router,     prefix="/data",     tags=["data"])
-app.include_router(collect.router,  prefix="/collect",  tags=["collect"])
+app.include_router(predict.router,  prefix="/predict",  tags=["predict"],  dependencies=[Security(verify_api_key)])
+app.include_router(roads.router,    prefix="/roads",     tags=["roads"],    dependencies=[Security(verify_api_key)])
+app.include_router(models.router,   prefix="/models",    tags=["models"],   dependencies=[Security(verify_api_key)])
+app.include_router(weather.router,  prefix="/weather",   tags=["weather"],  dependencies=[Security(verify_api_key)])
+app.include_router(data.router,     prefix="/data",      tags=["data"],     dependencies=[Security(verify_api_key)])
+app.include_router(collect.router,  prefix="/collect",   tags=["collect"],  dependencies=[Security(verify_api_key)])
 
 @app.get("/")
 def root():
