@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import predict, roads, models, health, weather, data
+from app.api import predict, roads, models, health, weather, data, collect
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,12 +27,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health.router,  prefix="/health",  tags=["health"])
-app.include_router(predict.router, prefix="/predict", tags=["predict"])
-app.include_router(roads.router,   prefix="/roads",   tags=["roads"])
-app.include_router(models.router,  prefix="/models",  tags=["models"])
-app.include_router(weather.router, prefix="/weather", tags=["weather"])
-app.include_router(data.router,    prefix="/data",    tags=["data"])
+app.include_router(health.router,   prefix="/health",   tags=["health"])
+app.include_router(predict.router,  prefix="/predict",  tags=["predict"])
+app.include_router(roads.router,    prefix="/roads",    tags=["roads"])
+app.include_router(models.router,   prefix="/models",   tags=["models"])
+app.include_router(weather.router,  prefix="/weather",  tags=["weather"])
+app.include_router(data.router,     prefix="/data",     tags=["data"])
+app.include_router(collect.router,  prefix="/collect",  tags=["collect"])
 
 @app.get("/")
 def root():
