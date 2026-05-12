@@ -9,3 +9,7 @@ slowapi
 pandas
 scikit-learn
 numpy
+shap
+scipy
+matplotlib
+seaborn
