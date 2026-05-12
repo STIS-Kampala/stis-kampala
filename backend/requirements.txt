@@ -6,3 +6,6 @@ httpx==0.28.0
 pytest==8.3.4
 psycopg2-binary
 slowapi
+pandas
+scikit-learn
+numpy
