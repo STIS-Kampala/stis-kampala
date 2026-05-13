@@ -1,4 +1,3 @@
-
 """
 train_real.py — Full Research Pipeline
 Experiments A, B, C + SHAP + Stats + Drift
@@ -12,8 +11,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
+from fastapi import APIRouter
 from scipy import stats
-from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.ensemble import (
+    GradientBoostingClassifier, GradientBoostingRegressor,
+    RandomForestRegressor, RandomForestClassifier
+)
+from sklearn.linear_model import Ridge
 from sklearn.metrics import (
     mean_absolute_error, mean_squared_error, r2_score,
     accuracy_score, f1_score, confusion_matrix,
@@ -21,6 +25,20 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import cross_val_score
 import shap
+import warnings
+warnings.filterwarnings("ignore")
+
+try:
+    from xgboost import XGBRegressor, XGBClassifier
+    HAS_XGB = True
+except ImportError:
+    HAS_XGB = False
+
+try:
+    from lightgbm import LGBMRegressor, LGBMClassifier
+    HAS_LGB = True
+except ImportError:
+    HAS_LGB = False
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger("train_real")
@@ -28,15 +46,17 @@ log = logging.getLogger("train_real")
 os.makedirs("results", exist_ok=True)
 os.makedirs("results/charts", exist_ok=True)
 
+router = APIRouter()
+
 FEATURES = [
     "is_rush_morning", "is_rush_evening", "is_rush_midday",
     "is_night", "is_weekend", "is_friday_pm",
     "has_boda_boda", "rain_mm", "hour",
 ]
-TARGET_REG = "delay_ratio"
-TARGET_CLF = "label_encoded"
-LABEL_MAP  = {"low": 0, "medium": 1, "high": 2}
-LABEL_INV  = {0: "low", 1: "medium", 2: "high"}
+TARGET_REG  = "delay_ratio"
+TARGET_CLF  = "label_encoded"
+LABEL_MAP   = {"low": 0, "medium": 1, "high": 2}
+LABEL_INV   = {0: "low", 1: "medium", 2: "high"}
 LABEL_NAMES = ["low", "medium", "high"]
 
 
@@ -120,6 +140,95 @@ def load_real() -> pd.DataFrame | None:
 
 
 # ─────────────────────────────────────────
+# METRICS + CONFIDENCE INTERVALS
+# ─────────────────────────────────────────
+
+def compute_metrics(y_reg_true, preds_reg, y_clf_true, preds_clf):
+    mae  = float(mean_absolute_error(y_reg_true, preds_reg))
+    rmse = float(np.sqrt(mean_squared_error(y_reg_true, preds_reg)))
+    r2   = float(r2_score(y_reg_true, preds_reg))
+    acc  = float(accuracy_score(y_clf_true, preds_clf))
+    f1   = float(f1_score(y_clf_true, preds_clf, average="weighted", zero_division=0))
+
+    errors = np.abs(np.array(y_reg_true) - preds_reg)
+    n_boot = 500
+    boot_means = [
+        np.mean(np.random.choice(errors, size=len(errors), replace=True))
+        for _ in range(n_boot)
+    ]
+    ci_low  = float(np.percentile(boot_means, 2.5))
+    ci_high = float(np.percentile(boot_means, 97.5))
+
+    return {
+        "MAE":         round(mae,     4),
+        "RMSE":        round(rmse,    4),
+        "R2":          round(r2,      4),
+        "Accuracy":    round(acc,     4),
+        "F1":          round(f1,      4),
+        "MAE_CI_low":  round(ci_low,  4),
+        "MAE_CI_high": round(ci_high, 4),
+    }
+
+
+# ─────────────────────────────────────────
+# ALL MODELS
+# ─────────────────────────────────────────
+
+def get_models():
+    models = {
+        "GradientBoosting": (
+            GradientBoostingRegressor(n_estimators=200, max_depth=4, learning_rate=0.1, random_state=42),
+            GradientBoostingClassifier(n_estimators=200, max_depth=4, learning_rate=0.1, random_state=42),
+        ),
+        "RandomForest": (
+            RandomForestRegressor(n_estimators=200, random_state=42),
+            RandomForestClassifier(n_estimators=200, random_state=42),
+        ),
+        "Ridge": (
+            Ridge(alpha=1.0),
+            None,
+        ),
+    }
+    if HAS_XGB:
+        models["XGBoost"] = (
+            XGBRegressor(n_estimators=200, max_depth=4, learning_rate=0.1,
+                         random_state=42, verbosity=0, eval_metric="rmse"),
+            XGBClassifier(n_estimators=200, max_depth=4, learning_rate=0.1,
+                          random_state=42, verbosity=0, eval_metric="mlogloss"),
+        )
+    if HAS_LGB:
+        models["LightGBM"] = (
+            LGBMRegressor(n_estimators=200, max_depth=4, learning_rate=0.1,
+                          random_state=42, verbose=-1),
+            LGBMClassifier(n_estimators=200, max_depth=4, learning_rate=0.1,
+                           random_state=42, verbose=-1),
+        )
+    return models
+
+
+def run_model(name, reg, clf, X_train, y_reg_train, y_clf_train,
+              X_test, y_reg_test, y_clf_test, train_size, exp_name):
+    reg.fit(X_train, y_reg_train)
+    preds_reg = reg.predict(X_test)
+
+    if clf is not None:
+        clf.fit(X_train, y_clf_train)
+        preds_clf = clf.predict(X_test)
+    else:
+        def lbl(x): return 2 if x >= 1.60 else (1 if x >= 1.25 else 0)
+        preds_clf = np.array([lbl(p) for p in preds_reg])
+
+    metrics = compute_metrics(y_reg_test, preds_reg, y_clf_test, preds_clf)
+    return {
+        "experiment": exp_name,
+        "model":      name,
+        "train_size": train_size,
+        **metrics,
+        "preds_reg":  preds_reg,
+    }
+
+
+# ─────────────────────────────────────────
 # TRAINING & EVALUATION
 # ─────────────────────────────────────────
 
@@ -141,22 +250,20 @@ def evaluate(reg, clf, X_test, y_reg_test, y_clf_test, name, train_size):
     acc_reg = sum(lbl(t) == lbl(p) for t, p in zip(y_reg_test, preds_reg)) / len(y_reg_test)
 
     result = {
-        "Experiment": name,
-        "Train_size": train_size,
-        "MAE":        round(float(mean_absolute_error(y_reg_test, preds_reg)), 4),
-        "RMSE":       round(float(np.sqrt(mean_squared_error(y_reg_test, preds_reg))), 4),
-        "R2":         round(float(r2_score(y_reg_test, preds_reg)), 4),
-        "Accuracy":   round(float(accuracy_score(y_clf_test, preds_clf)), 4),
-        "F1":         round(float(f1_score(y_clf_test, preds_clf,
-                                           average="weighted", zero_division=0)), 4),
+        "Experiment":   name,
+        "Train_size":   train_size,
+        "MAE":          round(float(mean_absolute_error(y_reg_test, preds_reg)), 4),
+        "RMSE":         round(float(np.sqrt(mean_squared_error(y_reg_test, preds_reg))), 4),
+        "R2":           round(float(r2_score(y_reg_test, preds_reg)), 4),
+        "Accuracy":     round(float(accuracy_score(y_clf_test, preds_clf)), 4),
+        "F1":           round(float(f1_score(y_clf_test, preds_clf,
+                                             average="weighted", zero_division=0)), 4),
         "Acc_from_reg": round(acc_reg, 4),
     }
 
-    # Confusion Matrix
     cm = confusion_matrix(y_clf_test, preds_clf)
     plot_confusion_matrix(cm, name)
 
-    # Classification report
     report = classification_report(y_clf_test, preds_clf,
                                    target_names=LABEL_NAMES, zero_division=0)
     with open(f"results/{name.split(':')[0].strip()}_report.txt", "w") as f:
@@ -185,14 +292,14 @@ def cross_validate(X, y_reg, y_clf, name):
 
     return {
         "cv_mae_mean": round(float(-cv_mae.mean()), 4),
-        "cv_mae_std":  round(float(cv_mae.std()), 4),
-        "cv_acc_mean": round(float(cv_acc.mean()), 4),
-        "cv_acc_std":  round(float(cv_acc.std()), 4),
+        "cv_mae_std":  round(float(cv_mae.std()),   4),
+        "cv_acc_mean": round(float(cv_acc.mean()),  4),
+        "cv_acc_std":  round(float(cv_acc.std()),   4),
     }
 
 
 # ─────────────────────────────────────────
-# SHAP — REAL
+# SHAP
 # ─────────────────────────────────────────
 
 def compute_shap(reg, X_test, name):
@@ -200,7 +307,6 @@ def compute_shap(reg, X_test, name):
     explainer   = shap.TreeExplainer(reg)
     shap_values = explainer.shap_values(X_test)
 
-    # Summary plot
     plt.figure(figsize=(8, 5))
     shap.summary_plot(shap_values, X_test, feature_names=FEATURES,
                       show=False, plot_type="bar")
@@ -210,11 +316,10 @@ def compute_shap(reg, X_test, name):
     plt.savefig(f"results/charts/shap_{safe}.png", dpi=150)
     plt.close()
 
-    # Mean absolute SHAP per feature
     mean_shap = np.abs(shap_values).mean(axis=0)
     shap_df   = pd.DataFrame({
-        "feature":    FEATURES,
-        "mean_shap":  mean_shap,
+        "feature":   FEATURES,
+        "mean_shap": mean_shap,
     }).sort_values("mean_shap", ascending=False)
     shap_df.to_csv(f"results/shap_{safe}.csv", index=False)
     log.info(f"Top SHAP feature: {shap_df.iloc[0]['feature']} = {shap_df.iloc[0]['mean_shap']:.4f}")
@@ -222,15 +327,79 @@ def compute_shap(reg, X_test, name):
 
 
 # ─────────────────────────────────────────
+# ABLATION STUDY
+# ─────────────────────────────────────────
+
+def ablation_study(X_train, y_reg_train, y_clf_train, X_test, y_reg_test, y_clf_test):
+    ablation_results = []
+
+    reg_base = GradientBoostingRegressor(
+        n_estimators=200, max_depth=4, learning_rate=0.1, random_state=42)
+    reg_base.fit(X_train, y_reg_train)
+    preds_base = reg_base.predict(X_test)
+    base_mae   = float(mean_absolute_error(y_reg_test, preds_base))
+
+    ablation_results.append({
+        "removed_feature": "None (Baseline)",
+        "MAE":       round(base_mae, 4),
+        "delta_MAE": 0.0,
+        "impact":    "—",
+    })
+
+    for feat in FEATURES:
+        remaining = [f for f in FEATURES if f != feat]
+        reg = GradientBoostingRegressor(
+            n_estimators=200, max_depth=4, learning_rate=0.1, random_state=42)
+        reg.fit(X_train[remaining], y_reg_train)
+        preds = reg.predict(X_test[remaining])
+        mae   = float(mean_absolute_error(y_reg_test, preds))
+        delta = round(mae - base_mae, 4)
+        ablation_results.append({
+            "removed_feature": feat,
+            "MAE":       round(mae, 4),
+            "delta_MAE": delta,
+            "impact":    f"+{delta:.4f}" if delta > 0 else f"{delta:.4f}",
+        })
+
+    ablation_results[1:] = sorted(
+        ablation_results[1:], key=lambda x: x["delta_MAE"], reverse=True)
+
+    return ablation_results
+
+
+# ─────────────────────────────────────────
 # STATISTICAL SIGNIFICANCE
 # ─────────────────────────────────────────
 
+def stat_tests(preds_dict, y_true):
+    """Wilcoxon signed-rank test between all model pairs (for API)."""
+    results = []
+    names   = list(preds_dict.keys())
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            n1, n2 = names[i], names[j]
+            e1 = np.abs(np.array(y_true) - preds_dict[n1])
+            e2 = np.abs(np.array(y_true) - preds_dict[n2])
+            try:
+                stat, p = stats.wilcoxon(e1, e2)
+                results.append({
+                    "comparison":  f"{n1} vs {n2}",
+                    "statistic":   round(float(stat), 4),
+                    "p_value":     round(float(p), 6),
+                    "significant": p < 0.05,
+                })
+            except Exception:
+                pass
+    return results
+
+
 def statistical_tests(preds: dict[str, np.ndarray], y_true):
+    """Wilcoxon with logging + CSV export (for script)."""
     log.info("\n=== Statistical Significance Tests ===")
     names = list(preds.keys())
     results = []
     for i in range(len(names)):
-        for j in range(i+1, len(names)):
+        for j in range(i + 1, len(names)):
             n1, n2 = names[i], names[j]
             e1 = np.abs(y_true - preds[n1])
             e2 = np.abs(y_true - preds[n2])
@@ -238,9 +407,9 @@ def statistical_tests(preds: dict[str, np.ndarray], y_true):
             sig = "✅ Significant" if p < 0.05 else "❌ Not significant"
             log.info(f"  {n1} vs {n2}: p={p:.4f} {sig}")
             results.append({
-                "comparison": f"{n1} vs {n2}",
-                "statistic":  round(float(stat), 4),
-                "p_value":    round(float(p), 6),
+                "comparison":  f"{n1} vs {n2}",
+                "statistic":   round(float(stat), 4),
+                "p_value":     round(float(p), 6),
                 "significant": p < 0.05,
             })
     pd.DataFrame(results).to_csv("results/statistical_tests.csv", index=False)
@@ -263,20 +432,15 @@ def data_drift_analysis(synth: pd.DataFrame, real: pd.DataFrame):
         drift = "⚠️ Drift" if p < 0.05 else "✅ Similar"
         log.info(f"  {feat}: KS={stat:.4f}, p={p:.4f} {drift}")
         results.append({
-            "feature":   feat,
-            "ks_stat":   round(float(stat), 4),
-            "p_value":   round(float(p), 6),
-            "drift":     p < 0.05,
+            "feature": feat,
+            "ks_stat": round(float(stat), 4),
+            "p_value": round(float(p), 6),
+            "drift":   p < 0.05,
         })
 
     pd.DataFrame(results).to_csv("results/data_drift.csv", index=False)
-
-    # Label distribution comparison
     plot_label_distribution(synth, real)
-
-    # Delay ratio distribution
     plot_delay_distribution(synth, real)
-
     return results
 
 
@@ -357,7 +521,134 @@ def plot_feature_importance(reg, name):
 
 
 # ─────────────────────────────────────────
-# MAIN
+# FASTAPI ENDPOINT
+# ─────────────────────────────────────────
+
+@router.get("")
+def train():
+    synth = load_synthetic()
+    real  = load_real()
+    n     = len(synth)
+
+    X_s       = synth[FEATURES]
+    y_reg_s   = synth[TARGET_REG]
+    y_clf_s   = synth[TARGET_CLF]
+
+    train_end  = int(n * 0.70)
+    test_start = int(n * 0.85)
+
+    X_train_s     = X_s.iloc[:train_end]
+    X_test_s      = X_s.iloc[test_start:]
+    y_reg_train_s = y_reg_s.iloc[:train_end]
+    y_reg_test_s  = y_reg_s.iloc[test_start:]
+    y_clf_train_s = y_clf_s.iloc[:train_end]
+    y_clf_test_s  = y_clf_s.iloc[test_start:]
+
+    all_results = []
+    model_preds = {}
+    models      = get_models()
+
+    # ── Experiment A: Synthetic Only ──
+    for mname, (reg, clf) in models.items():
+        r = run_model(
+            mname, reg, clf,
+            X_train_s, y_reg_train_s, y_clf_train_s,
+            X_test_s,  y_reg_test_s,  y_clf_test_s,
+            len(X_train_s), "A: Synthetic Only"
+        )
+        preds = r.pop("preds_reg")
+        all_results.append(r)
+        model_preds[f"A_{mname}"] = preds
+
+    if real is not None:
+        X_r     = real[FEATURES]
+        y_reg_r = real[TARGET_REG]
+        y_clf_r = real[TARGET_CLF]
+
+        # ── Experiment B: Synthetic + Real ──
+        X_b     = pd.concat([X_train_s, X_r], ignore_index=True)
+        y_reg_b = pd.concat([y_reg_train_s, y_reg_r], ignore_index=True)
+        y_clf_b = pd.concat([y_clf_train_s, y_clf_r], ignore_index=True)
+
+        for mname, (reg, clf) in models.items():
+            r = run_model(
+                mname, reg, clf,
+                X_b, y_reg_b, y_clf_b,
+                X_test_s, y_reg_test_s, y_clf_test_s,
+                len(X_b), "B: Synth + Real"
+            )
+            preds = r.pop("preds_reg")
+            all_results.append(r)
+            model_preds[f"B_{mname}"] = preds
+
+        # ── Experiment C: Real Only ──
+        if len(real) >= 100:
+            split      = int(len(real) * 0.8)
+            X_r_train  = X_r.iloc[:split]
+            X_r_test   = X_r.iloc[split:]
+            y_reg_r_tr = y_reg_r.iloc[:split]
+            y_reg_r_te = y_reg_r.iloc[split:]
+            y_clf_r_tr = y_clf_r.iloc[:split]
+            y_clf_r_te = y_clf_r.iloc[split:]
+
+            c_preds = {}
+            for mname, (reg, clf) in models.items():
+                r = run_model(
+                    mname, reg, clf,
+                    X_r_train, y_reg_r_tr, y_clf_r_tr,
+                    X_r_test,  y_reg_r_te, y_clf_r_te,
+                    split, "C: Real Only"
+                )
+                preds = r.pop("preds_reg")
+                all_results.append(r)
+                c_preds[mname] = preds
+
+            stat_results = stat_tests(c_preds, y_reg_r_te.values)
+            ablation     = ablation_study(
+                X_r_train, y_reg_r_tr, y_clf_r_tr,
+                X_r_test,  y_reg_r_te, y_clf_r_te,
+            )
+        else:
+            stat_results = []
+            ablation     = []
+
+        real_count = len(real)
+    else:
+        stat_results = []
+        ablation     = []
+        real_count   = 0
+
+    # ── Summary: best per experiment ──
+    df = pd.DataFrame(all_results)
+    summary = []
+    for exp in df["experiment"].unique():
+        sub  = df[df["experiment"] == exp]
+        best = sub.loc[sub["MAE"].idxmin()]
+        summary.append({
+            "experiment": exp,
+            "best_model": best["model"],
+            "train_size": int(best["train_size"]),
+            "MAE":        best["MAE"],
+            "RMSE":       best["RMSE"],
+            "R2":         best["R2"],
+            "Accuracy":   best["Accuracy"],
+            "F1":         best["F1"],
+            "MAE_95CI":   f"[{best['MAE_CI_low']}, {best['MAE_CI_high']}]",
+        })
+
+    return {
+        "status":            "ok",
+        "real_records":      real_count,
+        "models_tested":     list(models.keys()),
+        "summary":           summary,
+        "all_results":       all_results,
+        "ablation_study":    ablation,
+        "statistical_tests": stat_results,
+    }
+
+
+# ─────────────────────────────────────────
+# MAIN (Script)
 # ─────────────────────────────────────────
 
 def run_experiments():
@@ -365,7 +656,6 @@ def run_experiments():
     cv_results = []
     reg_preds  = {}
 
-    # ── Load data ──
     synth = load_synthetic()
     real  = load_real()
     n     = len(synth)
@@ -399,12 +689,10 @@ def run_experiments():
 
     if real is not None:
         log.info(f"\nReal data: {len(real)} records")
-
         X_r     = real[FEATURES]
         y_reg_r = real[TARGET_REG]
         y_clf_r = real[TARGET_CLF]
 
-        # ── Data Drift ──
         data_drift_analysis(synth, real)
 
         # ── Experiment B ──
@@ -445,10 +733,8 @@ def run_experiments():
             cv_c = cross_validate(X_r_train, y_reg_r_tr, y_clf_r_tr, "C")
             cv_results.append({"Experiment": "C", **cv_c})
 
-        # ── Statistical Tests (A vs B) ──
         statistical_tests(reg_preds, y_reg_test.values)
 
-    # ── Save Results ──
     df_res = pd.DataFrame(results)
     df_cv  = pd.DataFrame(cv_results)
     df_res.to_csv("results/experiment_results.csv", index=False)
