@@ -13,3 +13,5 @@ shap
 scipy
 matplotlib
 seaborn
+xgboost
+lightgbm
